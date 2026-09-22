@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Secrets — NEVER commit
+.env
+.env.prod
+.env.test
+*.key
+*.pem
+*.p12
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Docker / logs
+*.log
+logs/
+
+# Temporary / local files
+docs/
+.ruff_cache/
+search_result.json
+test_search.py
+searxng/settings.yml.new
+
+# Models (large binaries — never commit)
+models/
+
+# OS
+.DS_Store
+Thumbs.db
+/.claude/settings.local.json
+
+# 本地调试输出（脚本/临时结果，不入库）
+outputs/
+docker-compose.local.yml

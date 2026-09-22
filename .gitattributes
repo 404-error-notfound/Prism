@@ -1,0 +1,4 @@
+# 本仓库在 Windows 上开发、shell 脚本与 YAML 配置要进 Linux 容器/服务器执行：
+# 强制 LF。core.autocrlf=true 只保 *.sh 是不够的——sed/grep 不把 \r 当行尾，
+# 锚定匹配（^...$）会静默失效（2026-09-17 searxng 全灭事故的根因）。
+* text=auto eol=lf

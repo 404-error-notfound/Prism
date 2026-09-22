@@ -1,0 +1,133 @@
+# SearXNG settings for Prism — 模板文件，分片实例（一源一实例）共用
+#
+# ⚠️ 本文件不含任何代理地址与 token：outgoing 段的隧道占位符在容器启动时
+# 由 entrypoint 从环境变量 PROXY_SERVICE_URL（.env，proxy-hub 拓扑唯一事实源）推导
+# 渲染——host 相同、端口固定换 8101（proxy-hub 隧道端口契约），账密用
+# PROXY_PROJECT_TOKEN 注入。渲染产物写入容器层 /etc/searxng/settings.yml，不回落宿主机。
+# 配了 PROXY_SERVICE_URL 但 token 为空 → 容器拒绝启动（fail-fast）。
+# 加/换 proxy-hub 机器只改 .env 的 PROXY_SERVICE_URL 一行，各实例下次重建自动生效。
+#
+# 各分片实例完全同构（baidu/bing/quark/sogou/sogou wechat 五实例同镜像同本模板），
+# limiter 亦共享 searxng/limiter.toml。
+# 实例跑哪个引擎不由本文件决定——gateway 按 SEARXNG_SHARDS 映射发请求时带
+# engines= 参数切片，未点名的引擎即使登记在下方也不会被调用。
+
+use_default_settings:
+  engines:
+    remove:
+      - wikidata
+      - ahmia
+      - torch
+
+general:
+  debug: false
+  instance_name: "Prism Search"
+
+server:
+  # 固定随机值即可：仅用于 Flask session 签名，多实例无需一致
+  secret_key: "CHANGE_ME"
+  bind_address: "0.0.0.0"
+  port: 8080
+  base_url: false
+  limiter: false
+  public_instance: false
+  link_token: false
+
+ui:
+  static_use_hash: true
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "zh-CN"
+  formats:
+    - html
+    - json
+  suspended_times:
+    # 挂起时长对齐 proxy-hub 换 IP 落地时间(~2-10s)：隧道每连接换 IP，挂起到期即用
+    # 新 IP 恢复，故挂起只需覆盖"换 IP 落地"最坏窗口（撞供应商冷却 ~5-10s）。原 900s
+    # 会让引擎在换到干净 IP 后仍被 SearXNG 按"引擎名"benched 15 分钟，召回长期只剩
+    # 1-2 个引擎、sogou 陈货霸榜；30s 仍是换 IP 落地 3-6 倍，验证码后 proxy-hub 在
+    # t≈2-5s 已拉黑脏 IP + 补位新 IP，引擎却硬等到 30s 才恢复，中间 ~25s 纯浪费。
+    SearxEngineCaptcha: 10
+    SearxEngineTooManyRequests: 60
+    SearxEngineAccessDenied: 60
+
+# 实际生效的引擎清单以 gateway 请求参数 engines= 为准（docker-compose 的
+# SEARXNG_ENGINES）；此处登记用到的引擎 + 禁用占位。360search（反爬激进常返回空 body）、
+# bilibili（视频噪音）已彻底移除；duckduckgo/google 大陆不可达保持关闭。
+#
+# per-engine timeout（全部 3.5s）：SearXNG 聚合是"等全部引擎结束才一次性打包"，
+# 任一慢源会把整个聚合包拖过 prism ENGINE_TIMEOUT_S=5 的剪线预算——已到的结果
+# 一起陪葬（2026-09-04 实测：sogou 500KB 页穿隧道 12.9s，拖死整查 0 结果）。
+# 给每个源单独封顶 3.5s：慢源到点即弃，聚合 ~3.7s 完成，prism 5s 内拿到部分结果
+# （"超时的源不管，其余照常返回"）。代价：常慢源（sogou 系）会高频缺席。
+# 一源一实例分片下此值仍保留：gateway 对每片独立计时，实例内单引擎超时同样防
+# 单页抓取被目标站拖住。
+engines:
+  - name: baidu
+    engine: baidu
+    shortcut: bd
+    disabled: false
+    timeout: 3.5
+    headers:
+      Referer: "https://www.baidu.com/"
+
+  - name: bing
+    engine: bing
+    shortcut: bi
+    disabled: false
+    base_url: https://cn.bing.com/search
+    timeout: 3.5
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: true
+
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: true
+
+  - name: sogou
+    engine: sogou
+    shortcut: so
+    disabled: false
+    timeout: 3.5
+
+  - name: quark
+    engine: quark
+    shortcut: qk
+    disabled: false
+    timeout: 3.5
+    headers:
+      Referer: "https://quark.sm.cn/"
+
+  - name: sogou wechat
+    engine: sogou_wechat
+    shortcut: sogouw
+    disabled: false
+    timeout: 3.5
+
+outgoing:
+  # 隧道列表由 entrypoint 从 PROXY_SERVICE_URL 推导渲染（host 相同、端口换 8101，
+  # 账密 prism:<PROXY_PROJECT_TOKEN>，见文件头）；PROXY_SERVICE_URL 为空则整行删除 = 直连。
+  __PROXY_TUNNEL_PROXIES__
+  request_timeout: 5.0
+  max_request_timeout: 6.0
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: false
+  useragent_suffix: ""
+  default_http_headers:
+    Connection: "close"
+    # 不固定 UA：让 SearXNG 用内置 useragents 池按请求随机，避免"同一 UA 跨多轮换 IP"的机器人指纹
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+    Accept-Language: "zh-CN,zh;q=0.9,en;q=0.8"
+    Accept-Encoding: "gzip, deflate, br"
+    Upgrade-Insecure-Requests: "1"
+    Sec-Fetch-Dest: "document"
+    Sec-Fetch-Mode: "navigate"
+    Sec-Fetch-Site: "none"
+    Sec-Fetch-User: "?1"

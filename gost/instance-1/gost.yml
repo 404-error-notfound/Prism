@@ -1,0 +1,25 @@
+# 初始模板：upstream chain 指向占位地址，首次刷新前不可用（demand-driven 会先刷新）。
+# proxy_pool 经 gost API（PUT /api/config/chains/upstream）热更新上游 IP，进程不重启；
+# 也会回写本文件，供容器（意外）重启后恢复上次 IP。手动修改会被覆盖。
+api:
+  addr: ":18080"
+  pathPrefix: /api
+services:
+  - name: http-forward
+    addr: ":8080"
+    handler:
+      type: http
+      chain: upstream
+    listener:
+      type: tcp
+chains:
+  - name: upstream
+    hops:
+      - name: hop-0
+        nodes:
+          - name: node-0
+            addr: 127.0.0.1:1
+            connector:
+              type: http
+            dialer:
+              type: tcp

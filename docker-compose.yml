@@ -1,0 +1,151 @@
+# CentOS 7 + Docker 18.09 兼容：旧版 seccomp profile 不含 clone3 系统调用，
+# 新版 Python/glibc 线程创建会失败。待宿主机升级 Docker 20.10+ 后可删除此块。
+x-kernel-opts: &kernel-opts
+  security_opt:
+    - seccomp:unconfined
+  pids_limit: 0
+  ulimits:
+    nproc: 65535
+
+# SearXNG 公共定义（锚点须在别名引用之前定义）
+# settings.yml 不入库：容器启动时 entrypoint（searxng/entrypoint.sh，常量脚本路径、
+# compose 内零 $ 零插值——v1 插值器对内联 $$ 大段脚本会 Invalid interpolation format
+# 拒收，2026-09-17 踩过）调 render-settings.sh 从 .env 的 PROXY_SERVICE_URL 推导隧道
+# 列表（host 相同、端口固定换 8101——proxy-hub 隧道端口契约；账密用 PROXY_PROJECT_TOKEN
+# 注入），渲染 settings.template.yml 的隧道占位符行，产物过 YAML 硬校验后 exec 官方
+# entrypoint。拓扑唯一事实源是 .env：加/换 proxy-hub 机器只改 .env 一行。配了地址但
+# token 为空拒绝启动（fail-fast）；地址为空则渲染无 proxies 段的配置（直连出网）。
+# 渲染逻辑改动必须同步跑 tests/test_searxng_render.py（脚本与模板兼容性的回归）。
+x-searxng-render-entrypoint: &searxng-render-entrypoint
+  - /bin/sh
+  - /etc/searxng/entrypoint.sh
+
+x-searxng-common: &searxng-common
+  image: searxng/searxng:latest
+  restart: unless-stopped
+  environment:
+    # 单子 $：由 compose 解析时从 .env 插值（$$ 会转义成字面 ${...} 字符串）。
+    # 不用裸变量：v1 下裸变量只取宿主机环境、不读 .env
+    - PROXY_PROJECT_TOKEN=${PROXY_PROJECT_TOKEN}
+    # 隧道拓扑唯一事实源：entrypoint 由此推导 outgoing.proxies（host 相同、端口换 8101）
+    - PROXY_SERVICE_URL=${PROXY_SERVICE_URL}
+  entrypoint: *searxng-render-entrypoint
+  cap_drop:
+    - ALL
+  cap_add:
+    - CHOWN
+    - SETGID
+    - SETUID
+  # 分片实例完全同构（一源一实例，跑哪个源由 gateway 的 engines= 参数决定），
+  # 模板与 limiter 全实例共享，统一定义在此锚点
+  volumes:
+    - ./searxng/settings.template.yml:/etc/searxng/settings.template.yml:ro
+    - ./searxng/render-settings.sh:/etc/searxng/render-settings.sh:ro
+    - ./searxng/entrypoint.sh:/etc/searxng/entrypoint.sh:ro
+    - ./searxng/limiter.toml:/etc/searxng/limiter.toml:rw
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  # ----------------------------------------------------------------
+  # Prism Gateway
+  # Ubuntu 22.04 全量依赖；代码卷挂载，改代码后 restart 生效（生产不带 --reload）
+  # 启动：docker compose up -d --build
+  # 进入容器：docker exec -it prism-search_gateway_1 bash
+  # ----------------------------------------------------------------
+  gateway:
+    <<: *kernel-opts
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: prism-gateway:latest
+    restart: unless-stopped
+    ports:
+      - "8081:8001"
+    environment:
+      - APP_ENV=dev
+      - MCP_TRANSPORT=http
+      # SEARXNG_URLS / SEARXNG_ENGINES 不再在此覆盖，唯一来源是 .env
+      # （历史上 compose 与 .env 双份维护导致漂移，2026-09 收敛为单源）
+      - LOG_FILE_ENABLED=true
+      - HF_ENDPOINT=https://hf-mirror.com
+      # CentOS 7 老 libgomp：torch OpenMP 并行区在子线程（run_in_executor）里首次进入会死锁，
+      # 导致 reranker 在 startup warm_up 里卡死。单进程加载正常，仅线程池上下文触发。
+      - OMP_NUM_THREADS=1
+      # HF tokenizers 的 Rust 并行在非主线程/fork 后会死锁（CrossEncoder.predict 触发）
+      - TOKENIZERS_PARALLELISM=false
+    env_file:
+      - .env
+    volumes:
+      - .:/app                         # 代码 bind mount；uvicorn 无 --reload，改代码需 restart gateway
+      - ./logs:/app/logs               # 日志持久化
+      - pip_cache:/root/.cache/pip     # pip 缓存加速重装
+      # 模型权重持久化：命名卷首次挂载从镜像播种，之后持久保存下载的模型。
+      # 旧镜像未烘焙模型时，模型只存在此卷里——删掉挂载会导致新容器去 HF 重下（国际节点超时）。
+      - hf_cache:/root/.cache/huggingface
+    depends_on:
+      searxng-baidu:
+        condition: service_started
+      searxng-bing:
+        condition: service_started
+      searxng-quark:
+        condition: service_started
+      searxng-sogou:
+        condition: service_started
+      searxng-wechat:
+        condition: service_started
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      # 模型 warm_up 需 1~3 分钟，start_period 内不计失败，避免启动期被判 unhealthy
+      start_period: 240s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+  # ----------------------------------------------------------------
+  # SearXNG — 一源一实例分片（5 个无状态实例：baidu/bing/quark/sogou/sogou wechat）
+  # 实例与引擎的映射不在容器侧配置——全部由 gateway 请求参数 engines= 切片，
+  # 五实例同镜像同 settings 模板（共享 x-searxng-common 锚点），唯二差异是服务名
+  # （gateway 的 SEARXNG_SHARDS 指向它们）。
+  # 好处：每源独占进程+连接（IP 隔离是结构性的）、慢源/实例卡死只损失该源、熔断按片。
+  # ----------------------------------------------------------------
+  searxng-baidu:
+    <<: [*kernel-opts, *searxng-common]
+    # baidu 引擎 HTML 解析版 override（上游 tn=json 接口 100% 触发 wappass 验证码，
+    # 2026-09 A/B 实测；去 tn=json 后 HTML 页 200 稳定），覆盖镜像内同名引擎。
+    # 只挂 baidu 片，其他引擎不动。注意：merge key 下 volumes 是序列整体替换，
+    # 公共挂载需在此重写一遍（与 x-searxng-common 保持一致）
+    volumes:
+      - ./searxng/settings.template.yml:/etc/searxng/settings.template.yml:ro
+      - ./searxng/render-settings.sh:/etc/searxng/render-settings.sh:ro
+      - ./searxng/entrypoint.sh:/etc/searxng/entrypoint.sh:ro
+      - ./searxng/limiter.toml:/etc/searxng/limiter.toml:rw
+      - ./searxng/overrides/baidu.py:/usr/local/searxng/searx/engines/baidu.py:ro
+  searxng-bing:
+    <<: [*kernel-opts, *searxng-common]
+  searxng-quark:
+    <<: [*kernel-opts, *searxng-common]
+    # quark override（去掉上游硬编码 suspended_time=900，走 settings 10s，覆盖
+    # 镜像内同名引擎）。merge key 下 volumes 是序列整体替换，公共挂载需在此重写
+    # 一遍（与 x-searxng-common 保持一致）
+    volumes:
+      - ./searxng/settings.template.yml:/etc/searxng/settings.template.yml:ro
+      - ./searxng/render-settings.sh:/etc/searxng/render-settings.sh:ro
+      - ./searxng/entrypoint.sh:/etc/searxng/entrypoint.sh:ro
+      - ./searxng/limiter.toml:/etc/searxng/limiter.toml:rw
+      - ./searxng/overrides/quark.py:/usr/local/searxng/searx/engines/quark.py:ro
+  searxng-sogou:
+    <<: [*kernel-opts, *searxng-common]
+  searxng-wechat:
+    <<: [*kernel-opts, *searxng-common]
+volumes:
+  pip_cache:
+  hf_cache:
