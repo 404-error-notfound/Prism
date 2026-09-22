@@ -33,7 +33,6 @@ htmlcov/
 logs/
 
 # Temporary / local files
-docs/
 .ruff_cache/
 search_result.json
 test_search.py

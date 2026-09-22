@@ -405,7 +405,7 @@ PROXY_RETRY_EXTRA_BUDGET_S=5.0 # 代理质量失败（验证码/风控 0 结果�
 
 ### Issue tracker
 
-Issues tracked in GitLab (glab CLI). See `docs/agents/issue-tracker.md`.
+Issues tracked via GitHub Issues (gh CLI). See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
