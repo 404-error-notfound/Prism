@@ -68,7 +68,7 @@ crawl4ai-setup
 
 ## 代理池与 proxy-hub 集成
 
-Prism 不自己维护代理池，而是把代理池拆分为独立服务 [proxy-hub](https://github.com/your-org/proxy-hub)（通用共享代理池）。数据面只配一个隧道地址，控制面通过 API 驱动 proxy-hub 按需补位与换 IP。
+Prism 不自己维护代理池，而是把代理池拆分为独立服务 [proxy-hub](https://github.com/404-error-notfound/Prism-proxy)（通用共享代理池）。数据面只配一个隧道地址，控制面通过 API 驱动 proxy-hub 按需补位与换 IP。
 
 ```
 SearXNG 分片实例 ×5（baidu/bing/quark/sogou/sogou wechat 一源一实例）──静态指向──> proxy-hub 隧道 8101（项目账密）──> qg.net 短效住宅 IP ──> 搜索引擎
