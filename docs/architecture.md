@@ -1,5 +1,16 @@
 # Architecture
 
+## 目录
+
+- [Request flow (orchestrator)](#request-flow-orchestrator)
+- [Page content fetcher](#page-content-fetcher-appservicesfetcherpy)
+- [Engine adapters](#engine-adapters)
+- [SearXNG 分片拓扑 + 代理池](#searxng-分片拓扑--代理池)
+- [MCP server](#mcp-server)
+- [Authentication & tenancy](#authentication--tenancy)
+- [Configuration reference](#configuration-reference)
+- [Redis key conventions](#redis-key-conventions)
+
 ## Request flow (orchestrator)
 
 `app/services/orchestrator.py`:
@@ -44,7 +55,7 @@ Fetch order (fast static path first, browser last):
 
 > **抓取成功率的天花板由源站可抓性决定，不是吞吐。** 实测：对聚合页偏多的 query，把 `CRAWL4AI_TIMEOUT_S`、`CRAWL4AI_CONCURRENCY`、`CONTENT_FETCH_BUDGET_S` 三者全部调大（如 8s/6/25s），`fetched/N` 纹丝不动（2/10→2/10），只让延迟从 ~15s 飙到 ~36s，弱机器还会被多浏览器标签压垮。原因：`wenku.baidu`/`baike.sogou`/`xueshu.baidu` 等是登录墙/反爬站，Headless 浏览器给再多时间也过不了；能抓的（如 `zhidao.baidu` 静态页）trafilatura 早已秒抓。**结论：默认保守（5s/3），别靠调吞吐救成功率；要提升只能从源侧入手（跳过死站省延迟、排序把可抓源提前），或对慢响应改用 `/api/search/stream` 流式返回。**
 
-Shared httpx client (`_get_http_client`): singleton, 出网走 proxy-hub 隧道地址（`PROXY_TUNNEL_URL`，IP 轮换发生在 proxy-hub 侧，客户端无需感知）。`max_connections=50`, `keepalive=20`. Timeouts: connect=2s, read=3s.
+Shared httpx client (`_get_http_client`): singleton, 出网走 proxy-hub 隧道地址（由 `PROXY_SERVICE_URL` 推导；旧字段 `PROXY_TUNNEL_URL` 已废弃、仅作兼容回退，IP 轮换发生在 proxy-hub 侧，客户端无需感知）。`max_connections=50`, `keepalive=20`. Timeouts: connect=2s, read=3s.
 
 ## Engine adapters
 
@@ -67,7 +78,7 @@ All engines implement `BaseEngine` (`app/engines/base.py`): `async search(query,
 quark/sogou/sogou wechat 各占一个 SearXNG 实例，gateway 注册为 5 个独立逻辑引擎
 `searxng/<引擎名>`（`build_engines()` 工厂是拓扑/命名唯一来源）。
 
-```
+```text
             ┌─ searxng-baidu  (engines=baidu)        ─┐
             ├─ searxng-bing   (engines=bing)         ─┤
 prism Tier1 ├─ searxng-quark  (engines=quark)        ─┼─并发─> proxy-hub 隧道 8101 ─> 短效住宅 IP ─> 搜索引擎

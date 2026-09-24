@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 部署脚本（按变更类型选择更新策略）
+# 用途：部署脚本（按变更类型选择更新策略），test/本地/prod 环境通用。
 # 用法：
 #   deploy.sh <环境> [restart|config|build|stop|down]
 #
@@ -11,6 +11,11 @@
 #
 #   兼容旧习惯：code / start / up 会被视为 restart。
 # 环境对应文件：test -> .env.test，prod -> .env.prod，其余环境取 .env.<环境>（需存在）
+# 前置条件：docker + compose（v2 优先，v1 后备）可用、当前用户可访问 Docker 守护进程；
+#   对应环境的 .env.<环境> 存在；日志目录 /opt/logs/prism/prism-search/deploy 可写。
+# 环境变量：
+#   COMPOSE_HTTP_TIMEOUT   compose v1 等待 daemon 响应的超时秒数（默认 600；vfs 老机器上 300 不够）
+#   VERIFY_SETTLE_SECONDS  收工复核两次采样的间隔（默认 20）
 # 在任意目录下执行均可，效果与在项目根目录手工执行 docker compose 完全一致
 set -euo pipefail
 

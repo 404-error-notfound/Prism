@@ -3,6 +3,30 @@
 > **项目定位**：面向 LLM 场景的自托管聚合搜索基础设施。通过 SearXNG 多实例元搜索、自建代理 IP 池、Elasticsearch 热点索引与七因子混合排序，为 AI 应用提供低成本、可观测、结构化的搜索结果。
 >
 > **配套项目**：`hot-crawler`（`C:\code\AI\crawler`）独立部署的 Scrapy 爬虫，将微博/百度/头条/RSS 等热点内容写入共享 Elasticsearch，供 Prism 命中热路。两个项目仅通过 ES 索引交互，无代码依赖。
+>
+> **阅读提示**：本文侧重架构与选型思路的全景说明，成文较早。个别实现细节已迭代（如 SearXNG 现为「一源一实例分片 ×5」而非三实例路由、时效检测不再注入硬时间过滤），最新事实以 [`docs/architecture.md`](docs/architecture.md) 与 [`CLAUDE.md`](CLAUDE.md) 为准。
+
+---
+
+## 目录
+
+- [全链路请求流程图](#全链路请求流程图)
+- 一、搜索层：多引擎分级调度
+- 二、热点爬虫：hot-crawler（独立项目）
+- 三、并发架构：异步调度与预取重叠
+- 四、数据治理：六层防御体系
+- 五、混合排序：七因子加权模型
+- 六、域名信誉与 Session 反馈
+- 七、语义因子：bge-small-zh 向量
+- 八、对外服务：MCP + REST 双通道
+- 九、可观测性：trace_id + ES 日志投递
+- 十、多租户隔离与资源管控
+- 十一、出站网络与代理
+- 十二、部署规格与成本
+- 十三、Redis 键约定
+- 十四、落地状态总览
+- 十五、未实现功能与规划路线图
+- 十六、摘要层：BM25 抽取式
 
 ---
 
@@ -10,7 +34,7 @@
 
 > 包含 Elasticsearch 热点快路径（热路）与 SearXNG 冷查询路径（冷路），SearXNG 通过多实例 + 自建代理 IP 池实现翻页 IP 隔离。
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────┐
 │  调用方（LLM Agent / REST Client / Claude Desktop）                  │
 │  POST /api/search   |   GET /api/search/stream   |   MCP web_search │
@@ -159,7 +183,7 @@ Prism 不维护自有爬虫索引（热点除外），而是通过**SearXNG 多�
 
 #### 多实例分页架构
 
-```
+```text
 page 1 → prism-searxng-1（绑定 IP1）→ baidu p1 + bing p1 + ...
 page 2 → prism-searxng-2（绑定 IP2）→ baidu p2 + bing p2 + ...   ← 并发，不增加耗时
 page 3 → prism-searxng-3（绑定 IP3）→ baidu p3 + bing p3 + ...
@@ -176,7 +200,7 @@ page 3 → prism-searxng-3（绑定 IP3）→ baidu p3 + bing p3 + ...
 代理池已拆分为独立 proxy-hub 服务（独立仓库），gateway 进程内不再维护代理池
 （原 `app/services/proxy_pool.py` 已删除）：
 
-```
+```text
 proxy-hub 后台（主备副本，Redis 锁协调）
   → 按项目滚动补位：巡检清过期/判死剔除 → 缺几个补几个（ZSET 池保持固定长度，IP 用满 1min 生命周期）
   → prism 消费：SearXNG/fetcher/ChinaSo 统一经 proxy-hub 自建转发代理出网
@@ -273,7 +297,7 @@ proxy-hub 后台（主备副本，Redis 锁协调）
 
 ### 1.5 完整的降级流程
 
-```
+```text
 用户提问
   ↓
 查 Redis 缓存 → 命中直接返回
@@ -299,7 +323,7 @@ NeedContent=true？
 
 ### 2.1 调度与 Spider 结构
 
-```
+```text
 hot-crawler/
   main.py                  # Twisted asyncio reactor + LoopingCall 定时调度
   hot_crawler/
@@ -377,7 +401,7 @@ hot-crawler/
 
 中文互联网搜索结果面临 SEO 农场、镜像采集、竞价广告、AI 洗稿等多重污染。Prism 设计了六层递进式治理：
 
-```
+```text
 原始结果池
   ↓
 ① 源站准入控制（域名年龄 / ICP 备案 / 观察期）   — 规划中
@@ -450,7 +474,7 @@ Prism 与 hot-crawler 都使用同一份 `fingerprint.py` 算法（CJK 字级 + 
 
 ### 4.5 BM25：经典概率检索
 
-```
+```text
 score(D, Q) = Σ IDF(q_i) · [ f(q_i, D) · (k_1 + 1) ] / [ f(q_i, D) + k_1 · (1 - b + b · |D| / avgdl) ]
 ```
 
@@ -502,7 +526,7 @@ score(D, Q) = Σ IDF(q_i) · [ f(q_i, D) · (k_1 + 1) ] / [ f(q_i, D) + k_1 · (
 
 Bayesian 平滑 + 置信度加权：
 
-```
+```text
 ratio = (good + 10) / (good + bad + 20)          # 平滑好评率
 confidence = min(1, impression / 100)            # 观测置信度
 score = 0.5 * (1 - confidence) + ratio * confidence
@@ -764,7 +788,7 @@ grep '"trace_id": "abc123ef"' logs/timing.log | python -m json.tool
 
 `app/governance/paths.py` + `app/governance/aigc.py` 已实现，三档路径均已接入 orchestrator：
 
-```
+```text
 Fast:     URL 去重（跳过 SimHash + 商业评分）  — T1 白名单域名、技术类 Sites
 Standard: Fast + SimHash + 完整商业评分       — 默认
 Deep:     Standard + AIGC 规则检测            — intent=commercial / news
@@ -785,7 +809,7 @@ AIGC 检测（rules-based，无 ONNX）：句长方差 + 模板词密度 + CTA �
 
 ### 15.5 建议实施顺序
 
-```
+```text
 第一步（已完成）：SimHash ✅ + embedding factor ✅ + bge-reranker ✅
                 + SearXNG 多实例 + 代理池 ✅ + ES 日志独立索引 ✅
 

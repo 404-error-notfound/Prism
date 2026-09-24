@@ -6,6 +6,9 @@
 #   - 本文件承载全部 prod 特有逻辑：维护窗口（nginx 切对端/放回）、对端预检、
 #     失败时保持切对端。改动本文件不影响 test 与本地环境。
 #
+# 前置条件：生产双机 + nginx 已按 deploy/nginx/ 配置（维护标记目录对部署用户可写、
+#   两台互访 8081）；.env.prod 存在。单机/test 环境请直接用 deploy.sh。
+#
 # 用法（与原来完全一致）：
 #   deploy-prod.sh              等价于 deploy.sh prod restart
 #   deploy-prod.sh config       等价于 deploy.sh prod config

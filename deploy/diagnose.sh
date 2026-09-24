@@ -8,6 +8,7 @@
 #   bash deploy/diagnose.sh            # 取证最近 60 分钟
 #   bash deploy/diagnose.sh 19:10:00   # 从指定本地时刻开始取证
 #
+# 前置条件：docker 命令可用、当前用户可访问 Docker 守护进程；无额外环境变量。
 # 输出 8 段：容器清单 / 关键字段 / 容器事件 / 内核 OOM / dockerd 日志 / 磁盘与 inode /
 #            内存 / 各服务日志尾部。整段贴回即可定位。
 set -uo pipefail
@@ -18,7 +19,7 @@ note() { printf '    %s\n' "$*"; }
 for arg in "$@"; do
   case "$arg" in
     -h | --help)
-      sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
   esac

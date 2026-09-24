@@ -2,10 +2,13 @@
 set -e
 
 # Jenkins 部署脚本
-# 参数由 Jenkins 构建参数传入：
-# 本脚本统一调用 deploy/deploy.sh <环境>（按 APP_ENV 选择 .env.<环境>）
+# 用途：由 Jenkins 构建触发，rsync 推送代码到目标机并远程执行 deploy/deploy.sh。
+# 参数（Jenkins 构建参数 / 自动注入）：
 #   branchs    Git 分支，当前支持 origin/test
 #   WORKSPACE  Jenkins 自动注入的工作区路径
+# 前置条件：本机有 rsync/ssh；构建节点对目标机 ${WEB_USER}@${IP} 免密 ssh；
+#   目标机 /opt/web/prism-search 存在且含对应环境的 .env.<环境> 文件。
+# 说明：本脚本统一调用 deploy/deploy.sh <环境> config（按 APP_ENV 选择 .env.<环境>）
 
 PROJECT=prism-search
 SOURCE_CODE=${WORKSPACE}

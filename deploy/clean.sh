@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# 清空本项目全部容器（环境重置用）
+# 用途：环境重置——停止并删除 prism project 下的全部 compose 容器，
+#       以及历史 tag project 的残留容器。镜像、数据卷（hf_cache/pip_cache）不动。
 # 用法：
-#   clean.sh    停止并删除 prism project 下的全部 compose 容器，
-#               以及历史 tag... 项目残留。镜像、数据卷（hf_cache/pip_cache）不动。
-# 注意：执行后服务全部中断，需重新 deploy 才能恢复。
+#   bash deploy/clean.sh
+# 前置条件：docker 命令可用、当前用户可访问 Docker 守护进程（compose v2 / v1 均可）。
+# 环境变量：无需外部输入；脚本内部固定 COMPOSE_PROJECT_NAME=prism、COMPOSE_HTTP_TIMEOUT=300。
+# 注意：执行后服务全部中断，需重新 deploy（deploy.sh <环境> restart）才能恢复。
 set -euo pipefail
 
 # 项目根目录

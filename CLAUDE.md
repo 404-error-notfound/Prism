@@ -2,6 +2,25 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 目录
+
+- [语言偏好](#语言偏好)
+- [提交规范](#提交规范)
+- [参考文档](#参考文档)
+- [项目概览](#项目概览)
+- [技术栈](#技术栈)
+- [常用命令](#常用命令)
+- [项目结构](#项目结构)
+- [部署架构（代理出网链路）](#部署架构代理出网链路)
+- [常见错误与排查](#常见错误与排查)
+- [命令别名](#命令别名)
+- [测试规范](#测试规范)
+- [安全与合规](#安全与合规)
+- [架构概览](#架构概览)
+- [关键配置](#关键配置)
+- [待实现功能](#待实现功能)
+- [Agent 技能](#agent-技能)
+
 ## 语言偏好
 
 **始终用中文回复用户。** 所有解释、说明、问题和总结一律使用中文。代码、命令、文件路径保持原样不翻译。
@@ -29,9 +48,9 @@ Python 3.11 · FastAPI · Redis · Elasticsearch 9.3 + IK 分词 · SearXNG（�
 rank-bm25 · Crawl4AI · trafilatura · APScheduler · Prometheus  
 可选：`BAAI/bge-small-zh-v1.5`（排序第 7 因子 + 时效语义检测）· `BAAI/bge-reranker-base`（L3 精排，4c8g 推荐）
 
-## Commands
+## 常用命令
 
-### Install dependencies
+### 安装依赖
 ```bash
 pip install -e ".[dev]"                          # core + dev tools
 pip install -e ".[dev,governance,browser]"       # full install with ML reranker + Crawl4AI
@@ -42,13 +61,13 @@ After installing `browser` extras:
 crawl4ai-setup   # or: playwright install chromium
 ```
 
-### Run locally
+### 本地运行
 ```bash
 python -m app.main
 uvicorn app.main:app --reload
 ```
 
-### Docker (recommended)
+### Docker（推荐）
 ```bash
 docker compose up -d          # starts gateway + searxng-baidu/bing/quark/sogou/wechat（一源一实例分片；Redis 为外部依赖，不在 compose 里；代理隧道在 proxy-hub 侧）
 docker compose logs -f gateway
@@ -59,14 +78,14 @@ docker compose logs -f gateway
 > **本地 ES**：`C:\elasticsearch\elasticsearch-9.3.3\bin\elasticsearch.bat`
 > 容器通过 `http://host.docker.internal:9200` 访问；本地开发用 `localhost:9200`。IK 分词插件已安装。
 
-### Lint / test
+### Lint / 测试
 ```bash
 ruff check . && ruff format .
 pytest                          # all tests
 pytest -x -v                    # fail-fast
 ```
 
-### Read logs
+### 查看日志
 ```bash
 tail -f logs/prism.log | python -m json.tool        # 全量
 tail -f logs/prism.err.log | python -m json.tool    # 只看 ERROR（排障先看这个）
@@ -86,7 +105,7 @@ grep '"query_id":"abc123"' logs/prism.log | python -m json.tool   # 本地文件
 
 crawler 一轮爬取用 `run_id` 检索（crawler_log 索引）；proxy-hub 侧一次补位用 `batch_id` 检索（proxyhub_logs 索引；滚动补位模型下与查询解耦，prism 日志侧无对应字段）。**跨链路排查关联机制**（2026-09-04 起）：① **query_id 直达**——prism 调 `/refresh`、`/activity` 自动携带 `{"query_id"}`，proxyhub_logs 直接按 `query_id` 检索，刷新/活跃信号与同一秒的池事件精确对齐（`/activity` 有 10s 节流，仅作旁证，确定性锚点靠 `/refresh`）；② **query 人可读锚点**——信号同时自动携带查询词（落 proxyhub_logs `metrics.query`），直接在 Kibana 搜关键词（如 "asyncio"）即可定位那批池事件，不必翻 prism 日志复制 uuid；③ **forwarder 连接日志**——每条隧道连接一行 `forwarder: conn <project> <client_ip> → <target_host> via <upstream_ip> <ms>ms`（metrics 含 target/upstream/client/elapsed_ms），client_ip 对应 SearXNG 实例（经宿主机 NAT 时为网关 IP，多实例共享，只能按秒级窗口拼接）。回退手段仍是裸时间窗（`prism_logs` 无 `instance_id` 字段）。
 
-### Manage API keys
+### 管理 API Key
 ```bash
 python scripts/create_api_key.py --tenant my-app --quota 5000 --qps 10
 python scripts/seed_denylist.py
@@ -94,7 +113,7 @@ python scripts/seed_denylist.py
 
 ## 项目结构
 
-```
+```text
 app/
 ├── main.py              # FastAPI 入口 + MCP SSE 挂载 + 全局异常处理
 ├── api/                 # REST 路由层
@@ -141,7 +160,7 @@ gost/                    # 历史留档：早期本机 forwarder 的 Dockerfile/
 
 ## 部署架构（代理出网链路）
 
-```
+```text
 SearXNG instance-N ──出网经──> proxy-hub 隧道地址（HTTP 代理带项目账密，如 http://prism:<token>@<proxy-hub>:8101，从 PROXY_SERVICE_URL 推导：host 相同、端口换 8101）──> 短效上游 IP ──> 搜索引擎
                                         ↑ proxy-hub 自建 HTTP 转发代理（无 gost），每连接按目标站防重轮换挑上游 IP
 ```
@@ -248,7 +267,7 @@ proxy-hub 侧沿用已验证的代理策略：三态健康探测（经 IP 发一
 | offpeak 池大小 | 3 | `fetch_num` |
 | 空闲阈值 | 300s/600s | peak/normal 与 offpeak 的 `idle_threshold_s`；超过则池归零 |
 | 维护锁 TTL | 60s | 维护锁 TTL；主宕机后 ≤60s 内备机接管 |
-| 热配置生效 | ≤15s | 热配置生效延迟；≤15s（Redis + 10s 进程缓存） |
+| 热配置生效延迟 | ≤15s | Redis 下发 + 10s 进程内缓存 |
 | 分批补位防抖 | 缺口≥3 分批 | `topup_stagger_min_n/chunk_size=2/delay 2-5s`；防同批 IP 同 deadline 齐到期成"过期波"，池空/紧急整批快补 |
 | 提前补位 | 维护轮投影 | 按"再过 `alloc_min_ttl_s` 仍可下发"投影水位提前补位，旧 IP 用满寿命不提前杀 |
 | 低水位快补 | ≤目标一半 | 冷却缩到 `low_pool_cooldown_s`（默认 3s，热配置）+ refresh_tick 1s 一轮；空池持续 30s 打 ERROR（proxyhub_logs 可配告警） |
@@ -258,29 +277,29 @@ proxy-hub 侧沿用已验证的代理策略：三态健康探测（经 IP 发一
 
 ## 常见错误与排查
 
-| 症状 | 原因 | 解法                                                                                                                                                                                                                                                                 |
-|---|---|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `raw_count=0` + `engine.timeout`/`ProxyError 503`/`CAPTCHA` | 上游 IP 慢/死/被风控 | 查 proxy-hub `/status` 与日志，调热配置；仍残留则开 `TIER2_DEFAULT`                                                                                                                                                                                                               |
-| `search.engines_done` 长期只剩 1-2 个 `sub_engines` / sogou 陈货霸榜首条 | 引擎吃 CAPTCHA 被 SearXNG 按**引擎名**挂起 `suspended_times.SearxEngineCaptcha`；**换 IP 不清这个挂起**（二者解耦，挂起期内换到干净 IP 也被跳过），默认已 900→30s 对齐换 IP 节奏 | 改模板 `searxng/settings.template.yml` 的 suspended_times + `docker compose up -d --force-recreate`（5 个分片实例全量重建；restart 不重新渲染 settings）+ 多抽干净 IP；仍抖动说明 IP 脏，开 `TIER2_DEFAULT` 兜底                                                                                       |
-| proxy-hub 日志 `all fetched proxy IPs failed health check` | 探测全灭(别用百度做探测 URL，会全误杀) | 确认 proxy-hub 的 `HEALTH_CHECK_URL` 是 bing(`cn.bing.com/search?q=新闻`)，不是百度                                                                                                                                                                                           |
-| 启动卡在 `embedder ready` 之后无 `reranker ready`/`Prism ready` | CentOS7 老 libgomp + tokenizers 在线程池里加载 reranker 死锁 | gateway 环境设 `OMP_NUM_THREADS=1` + `TOKENIZERS_PARALLELISM=false`（已写入 compose）                                                                                                                                                                                      |
-| 启动一直下载模型(`cas-bridge.xethub.hf.co` 超时) | `hf_cache` 卷挂载被删 → 镜像未烘焙模型 → 去 HF 重下 | 确认 docker-compose 保留 `hf_cache:/root/.cache/huggingface` 卷挂载（模型在卷里）                                                                                                                                                                                                |
-| 改了代码/配置后 `docker exec` 报 `getcwd() failed`/`No module named app` | 宿主机 repo 目录被删重建，容器 bind mount 指向旧 inode 失效 | `docker-compose up -d --force-recreate`（重建容器重新挂载）；`restart` 不够                                                                                                                                                                                                     |
+| 症状 | 原因 | 解法 |
+|---|---|---|
+| `raw_count=0` + `engine.timeout`/`ProxyError 503`/`CAPTCHA` | 上游 IP 慢/死/被风控 | 查 proxy-hub `/status` 与日志，调热配置；仍残留则开 `TIER2_DEFAULT` |
+| `search.engines_done` 长期只剩 1-2 个 `sub_engines` / sogou 陈货霸榜首条 | 引擎吃 CAPTCHA 被 SearXNG 按**引擎名**挂起 `suspended_times.SearxEngineCaptcha`；**换 IP 不清这个挂起**（二者解耦，挂起期内换到干净 IP 也被跳过），默认已 900→30s 对齐换 IP 节奏 | 改模板 `searxng/settings.template.yml` 的 suspended_times + `docker compose up -d --force-recreate`（5 个分片实例全量重建；restart 不重新渲染 settings）+ 多抽干净 IP；仍抖动说明 IP 脏，开 `TIER2_DEFAULT` 兜底 |
+| proxy-hub 日志 `all fetched proxy IPs failed health check` | 探测全灭(别用百度做探测 URL，会全误杀) | 确认 proxy-hub 的 `HEALTH_CHECK_URL` 是 bing(`cn.bing.com/search?q=新闻`)，不是百度 |
+| 启动卡在 `embedder ready` 之后无 `reranker ready`/`Prism ready` | CentOS7 老 libgomp + tokenizers 在线程池里加载 reranker 死锁 | gateway 环境设 `OMP_NUM_THREADS=1` + `TOKENIZERS_PARALLELISM=false`（已写入 compose） |
+| 启动一直下载模型(`cas-bridge.xethub.hf.co` 超时) | `hf_cache` 卷挂载被删 → 镜像未烘焙模型 → 去 HF 重下 | 确认 docker-compose 保留 `hf_cache:/root/.cache/huggingface` 卷挂载（模型在卷里） |
+| 改了代码/配置后 `docker exec` 报 `getcwd() failed`/`No module named app` | 宿主机 repo 目录被删重建，容器 bind mount 指向旧 inode 失效 | `docker-compose up -d --force-recreate`（重建容器重新挂载）；`restart` 不够 |
 | 生产 `deploy-prod.sh config/build` 报 `Read timed out (read timeout=300)` 或 `OCI runtime create failed ... pid from pipe caused "EOF"`；重试 5 轮后仍 `exited`，日志里容器名带 `<hash>_` 前缀 | 两条叠加：① `gateway` 的 `depends_on` 让 `up --force-recreate gateway` 连带重建 5 个 searxng，串行策略塌成 6 容器并发；② 宿主机 Storage Driver 是 `vfs`（无层共享），每个容器创建=整份镜像拷贝，并发之下 daemon 内存/磁盘/inode 吃紧，runc 子进程写回 pid 前就死了 | 已修（`deploy/deploy.sh`）：**恒定逐服务串行**（`compose_up` 不再按驱动分流）+ `--no-deps`、跨轮次跳过已成功重建的服务、每轮清 `created`/`dead` 残留、`COMPOSE_HTTP_TIMEOUT` 默认 600。现场卡死先 `bash deploy/recover-docker.sh`（清理后仍 EOF 才加 `--restart-daemon`）。根治见 [`docs/deploy.md`](docs/deploy.md) 「存储驱动是 vfs」 |
-| 脚本报 `全部服务正常运行`、`/health` 也通，但之后 `docker ps` 里没有某容器（如 gateway） | 校验只在收工那一刻采样一次，容器可能在其后才崩 | 已加收工复核 `verify_stable`：硬判失败只认「不在运行态 / `running(restarting)` 崩溃循环 / 窗口内重启次数增长」；`RestartCount>0` 但稳定 running 属启动期自愈，**只提示不判失败**（曾收紧成硬判据，把一次成功部署误判为失败，见 [`docs/deploy.md`](docs/deploy.md)「收工复核」）；死因排查跑 `bash deploy/diagnose.sh`                                     |
-| 本机服务明明正常，但请求都由对端机器响应（本机 access 日志无流量）；或本机一直不接流量 | 故障转移的维护标记文件残留——「切对端」配置下残留**不报错**（流量静默走对端，HTTP 探测发现不了），多为部署失败时按 `NGINX_KEEP_FLAG_ON_FAILURE=1`（默认）故意保留，或脚本被 `kill -9` 未触发 trap | 重跑一次部署即自愈（重放标记→成功→自动清除）；或手工 `rm -f /opt/nginx/maintenance/prism.flag`（无需 reload）；临时关闭该机制：`NGINX_MODE=off bash deploy/deploy-prod.sh config`。见 [`docs/deploy.md`](docs/deploy.md)「故障转移」                                                                             |
-| `docker ps` 里 gateway 显示 `Up N minutes`，但 `CREATED` 比它早好几分钟，且 `重启次数` ≥1 | gateway 冷启动 200s+（vfs 创建=整份镜像拷贝），首次启动偶发退出后被 `restart: unless-stopped` 拉起，第二次启动成功 → 属自愈，部署成功 | 不影响服务；想查第一次为什么退出：`docker logs --tail 100 prism_gateway_1` + `docker inspect prism_gateway_1`（看 `ExitCode`/`OOMKilled`/`State.StartedAt`）                                                                                                                           |
-| 本地（Windows）容器里 searxng 全部 `restarting` 重启次数飞涨，日志尾部是 `yaml.scanner.ScannerError: mapping values are not allowed here in "/etc/searxng/settings.yml", line NNN` + `FATAL: settings.yml 渲染产物 YAML 非法` | 工作区文件被 `core.autocrlf=true` 检出成 CRLF：Linux 上 `^  __PROXY_TUNNEL_PROXIES__$` 匹配不到带 `\r` 的行 → 占位符既不替换、也不报残留（静默通过）→ 产物留着占位符，下一行 `  request_timeout:` 的冒号被当成非法 mapping（2026-09-17 本地 5 实例全灭；MSYS 本地复现不出来，因为 Git Bash 的 sed 把 CRLF 当行尾） | 已修：`searxng/render-settings.sh` 对模板与两个 env 值做 `tr -d '\r'`、残留检查容忍行尾 CR；`.gitattributes` 扩为 `* text=auto eol=lf`。自查 `git ls-files --eol \| grep -v 'w/lf'`，历史检出 `git add --renormalize .`。回归测试 `tests/test_searxng_render.py::TestLineEndingRobustness`             |
-| `Redis connection refused` | Redis 未启动 / 端口错误 | 检查 `REDIS_URL`（远程集群），`REDIS_CLUSTER_MODE=true`                                                                                                                                                                                                                     |
-| `search.done result_count=0` 但 `raw_count>0` | 结果被相关性闸门过滤光（非代理问题） | 检查 L1 覆盖率闸门/L3 分数闸门，降 `RERANKER_SCORE_FLOOR`                                                                                                                                                                                                                       |
-| 响应 >10s | 冷门 query 走 SearXNG 全链路 | 开启 `HOT_INDEX_ENABLED=true`，热点 query 走 ES，≤500ms                                                                                                                                                                                                                   |
-| `NeedContent=true` 抓正文慢/`fetched=0/N` | 出网慢，单页 TLS 握手 2-3s，抓取赶不上墙钟闸 | 调大 `CONTENT_FETCH_BUDGET_S`（默认 5s，慢机房用 10s）                                                                                                                                                                                                                        |
-| `fetch.failed` 整批全灭（尤其 toutiao/sina/zhihu/baijiahao 等国内内容站） | 看出网链路/单站风控：日志带 `reason=download:<egress>:<异常>` | `CONTENT_FETCH_EGRESS` 默认 `proxy_first`（代理池运营商 IP 优先、直连兜底）；宽带出口环境可改 `direct_first`；`weixin.sogou.com/link` 跳转壳必进验证码墙，已直接跳过                                                                                                                                         |
-| 结果全是某低信任域名的陈年货（如 10/10 weixin.sogou.com 2016-2022 旧文） | 分片大面积被风控只剩独苗源；日志应有 `search.recall_monopoly` | 自动刷新 IP 重试（`RECALL_MONOPOLY_*`）；N 天前低信任结果由时效硬过滤丢弃（`RECALL_STALE_MAX_AGE_DAYS`，默认 730）；反复出现说明代理池质量差，查 proxy-hub                                                                                                                                                     |
-| prism 日志 `proxy_client: /activity 403` / `refresh 403` | `PROXY_PROJECT_TOKEN` 缺失/错误 | 在 proxy-hub 注册 "prism" 项目，将 token 填入 `.env`                                                                                                                                                                                                                        |
-| proxy-hub 日志 `prism refresh skipped, maintenance lock held` | 主备锁竞争，另一副本正在维护 | 正常现象；持续超锁 TTL 则检查是否有僵死副本                                                                                                                                                                                                                                           |
-| proxy-hub `GET /status` 返回 `"available":false` | 池真空（全部自然过期；禁区回退也无 IP 可发） | 立即 `POST /refresh`；检查是否空闲过久                                                                                                                                                                                                                                        |
-| 首查/空闲后首查零结果，随后正常 | 池归零后唤热不够快 | 检查 `ensure_warm()` 是否触发；`PROXY_SERVICE_URL` 是否可达                                                                                                                                                                                                                   |
+| 脚本报 `全部服务正常运行`、`/health` 也通，但之后 `docker ps` 里没有某容器（如 gateway） | 校验只在收工那一刻采样一次，容器可能在其后才崩 | 已加收工复核 `verify_stable`：硬判失败只认「不在运行态 / `running(restarting)` 崩溃循环 / 窗口内重启次数增长」；`RestartCount>0` 但稳定 running 属启动期自愈，**只提示不判失败**（曾收紧成硬判据，把一次成功部署误判为失败，见 [`docs/deploy.md`](docs/deploy.md)「收工复核」）；死因排查跑 `bash deploy/diagnose.sh` |
+| 本机服务明明正常，但请求都由对端机器响应（本机 access 日志无流量）；或本机一直不接流量 | 故障转移的维护标记文件残留——「切对端」配置下残留**不报错**（流量静默走对端，HTTP 探测发现不了），多为部署失败时按 `NGINX_KEEP_FLAG_ON_FAILURE=1`（默认）故意保留，或脚本被 `kill -9` 未触发 trap | 重跑一次部署即自愈（重放标记→成功→自动清除）；或手工 `rm -f /opt/nginx/maintenance/prism.flag`（无需 reload）；临时关闭该机制：`NGINX_MODE=off bash deploy/deploy-prod.sh config`。见 [`docs/deploy.md`](docs/deploy.md)「故障转移」 |
+| `docker ps` 里 gateway 显示 `Up N minutes`，但 `CREATED` 比它早好几分钟，且 `重启次数` ≥1 | gateway 冷启动 200s+（vfs 创建=整份镜像拷贝），首次启动偶发退出后被 `restart: unless-stopped` 拉起，第二次启动成功 → 属自愈，部署成功 | 不影响服务；想查第一次为什么退出：`docker logs --tail 100 prism_gateway_1` + `docker inspect prism_gateway_1`（看 `ExitCode`/`OOMKilled`/`State.StartedAt`） |
+| 本地（Windows）容器里 searxng 全部 `restarting` 重启次数飞涨，日志尾部是 `yaml.scanner.ScannerError: mapping values are not allowed here in "/etc/searxng/settings.yml", line NNN` + `FATAL: settings.yml 渲染产物 YAML 非法` | 工作区文件被 `core.autocrlf=true` 检出成 CRLF：Linux 上 `^  __PROXY_TUNNEL_PROXIES__$` 匹配不到带 `\r` 的行 → 占位符既不替换、也不报残留（静默通过）→ 产物留着占位符，下一行 `  request_timeout:` 的冒号被当成非法 mapping（2026-09-17 本地 5 实例全灭；MSYS 本地复现不出来，因为 Git Bash 的 sed 把 CRLF 当行尾） | 已修：`searxng/render-settings.sh` 对模板与两个 env 值做 `tr -d '\r'`、残留检查容忍行尾 CR；`.gitattributes` 扩为 `* text=auto eol=lf`。自查 `git ls-files --eol \| grep -v 'w/lf'`，历史检出 `git add --renormalize .`。回归测试 `tests/test_searxng_render.py::TestLineEndingRobustness` |
+| `Redis connection refused` | Redis 未启动 / 端口错误 | 检查 `REDIS_URL`（远程集群），`REDIS_CLUSTER_MODE=true` |
+| `search.done result_count=0` 但 `raw_count>0` | 结果被相关性闸门过滤光（非代理问题） | 检查 L1 覆盖率闸门/L3 分数闸门，降 `RERANKER_SCORE_FLOOR` |
+| 响应 >10s | 冷门 query 走 SearXNG 全链路 | 开启 `HOT_INDEX_ENABLED=true`，热点 query 走 ES，≤500ms |
+| `NeedContent=true` 抓正文慢/`fetched=0/N` | 出网慢，单页 TLS 握手 2-3s，抓取赶不上墙钟闸 | 调大 `CONTENT_FETCH_BUDGET_S`（默认 5s，慢机房用 10s） |
+| `fetch.failed` 整批全灭（尤其 toutiao/sina/zhihu/baijiahao 等国内内容站） | 看出网链路/单站风控：日志带 `reason=download:<egress>:<异常>` | `CONTENT_FETCH_EGRESS` 默认 `proxy_first`（代理池运营商 IP 优先、直连兜底）；宽带出口环境可改 `direct_first`；`weixin.sogou.com/link` 跳转壳必进验证码墙，已直接跳过 |
+| 结果全是某低信任域名的陈年货（如 10/10 weixin.sogou.com 2016-2022 旧文） | 分片大面积被风控只剩独苗源；日志应有 `search.recall_monopoly` | 自动刷新 IP 重试（`RECALL_MONOPOLY_*`）；N 天前低信任结果由时效硬过滤丢弃（`RECALL_STALE_MAX_AGE_DAYS`，默认 730）；反复出现说明代理池质量差，查 proxy-hub |
+| prism 日志 `proxy_client: /activity 403` / `refresh 403` | `PROXY_PROJECT_TOKEN` 缺失/错误 | 在 proxy-hub 注册 "prism" 项目，将 token 填入 `.env` |
+| proxy-hub 日志 `prism refresh skipped, maintenance lock held` | 主备锁竞争，另一副本正在维护 | 正常现象；持续超锁 TTL 则检查是否有僵死副本 |
+| proxy-hub `GET /status` 返回 `"available":false` | 池真空（全部自然过期；禁区回退也无 IP 可发） | 立即 `POST /refresh`；检查是否空闲过久 |
+| 首查/空闲后首查零结果，随后正常 | 池归零后唤热不够快 | 检查 `ensure_warm()` 是否触发；`PROXY_SERVICE_URL` 是否可达 |
 
 > 零结果排查铁律：先看 `search.engines_done.raw_count`：`raw_count=0` 是引擎层问题（查 SearXNG 日志、proxy-hub `/status` 和 `proxyhub_logs`）；`raw_count>0` 而 `result_count=0` 是排序/闸门问题。跨链路排查无直接关联键，按时间窗关联 `proxyhub_logs`（方法见上文「日志字段规范」段）。
 
@@ -309,11 +328,11 @@ ab -n 100 -c 10 -H 'Authorization: Bearer <key>' 'http://localhost:8000/api/sear
 - **域名黑名单**：Redis 集合 `denylist:domains` 实时过滤
 - **个保法合规**：`/admin/preferences/{user_id}`（删除用户偏好数据）**尚未实现**——代码中无此端点，勿按旧文档调用
 
-## Architecture Overview
+## 架构概览
 
 核心流水线：`app/services/orchestrator.py`
 
-```
+```text
 请求 → 时效检测(正则+向量) → 查询改写 → 缓存检查
      → ES热点索引(可选,L1闸门) → Tier1并发搜索(over-fetch top_n×5)
      → 去重(URL 归一化剥 query；跳转型端点如 weixin.sogou.com/link 例外，只保留 url= 身份参数) → denylist → 去垃圾农场(spam_gate) → Tier2兜底(过滤后池薄才触发)
@@ -339,7 +358,7 @@ ES 热路：`HOT_INDEX_ENABLED=true` 时查 `hot_news` 索引，先经 `min_cove
 
 详细流程见 [`docs/architecture.md`](docs/architecture.md)。
 
-## Key Configuration
+## 关键配置
 
 ```bash
 # 必须设置
@@ -401,7 +420,7 @@ PROXY_RETRY_EXTRA_BUDGET_S=5.0 # 代理质量失败（验证码/风控 0 结果�
 - **AIGC 检测 Qwen ONNX** — 规则层 ✅，Qwen ONNX 变体未实现
 - **Source gate**（ICP / 域名年龄）— 未实现
 
-## Agent skills
+## Agent 技能
 
 ### Issue tracker
 

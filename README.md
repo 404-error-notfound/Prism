@@ -25,6 +25,22 @@
 - **Prometheus 指标**：`/metrics` 端点暴露缓存命中率、请求数、引擎错误率等
 - **双传输模式**：MCP over STDIO（本地客户端）或 HTTP+SSE（多客户端部署）
 
+## 架构概览
+
+```text
+调用方（LLM Agent / REST / Claude）
+        │  MCP（stdio / HTTP+SSE）或 POST /api/search（火山引擎兼容格式）
+        ▼
+Prism gateway（FastAPI，无状态）
+        │  鉴权/限流 → 时效检测 → 缓存 → ES 热点快路（可选）
+        │  → Tier1 并发搜索（SearXNG 分片 ×5 + 可选 ChinaSo）
+        │  → 去重/黑名单/反垃圾 → 三层相关性防线 → 7 因子排序 + L3 精排
+        ▼
+外部依赖：Redis（缓存/配额/熔断）· Elasticsearch（热点索引 + 日志）· proxy-hub（代理隧道）
+```
+
+架构与选型的完整说明见 [`architecture-overview.md`](architecture-overview.md) 与 [`docs/architecture.md`](docs/architecture.md)。
+
 ## 快速开始
 
 ### 方式一：Docker Compose（推荐，Ubuntu 22.04 全量依赖）
@@ -70,7 +86,7 @@ crawl4ai-setup
 
 Prism 不自己维护代理池，而是把代理池拆分为独立服务 [proxy-hub](https://github.com/404-error-notfound/Prism-proxy)（通用共享代理池）。数据面只配一个隧道地址，控制面通过 API 驱动 proxy-hub 按需补位与换 IP。
 
-```
+```text
 SearXNG 分片实例 ×5（baidu/bing/quark/sogou/sogou wechat 一源一实例）──静态指向──> proxy-hub 隧道 8101（项目账密）──> qg.net 短效住宅 IP ──> 搜索引擎
                                                                                                   └─ baidu/quark 由 proxy-hub 按目标站自动路由到独享池（exclusive），池空落回共享
 fetcher / ChinaSo ──────────────────────────────────────────────> 同上
@@ -92,7 +108,7 @@ prism 在 `app/services/proxy_client.py` 中封装了与 proxy-hub 的三类交�
 
 消费方代理统一指向：
 
-```
+```text
 http://prism:<PROXY_PROJECT_TOKEN>@<proxy-hub-host>:8101
 ```
 
@@ -116,7 +132,7 @@ http://prism:<PROXY_PROJECT_TOKEN>@<proxy-hub-host>:8101
 
 ## 项目结构
 
-```
+```text
 prism/
 ├── app/
 │   ├── core/           # config, auth, logging, validator
@@ -170,7 +186,8 @@ prism/
 ## API 端点
 
 所有 `/api/*` 端点需要在请求头携带 API Key：
-```
+
+```http
 Authorization: Bearer <your-api-key>
 ```
 
@@ -367,6 +384,18 @@ curl -X POST http://localhost:8000/admin/keys \
 
 proxy-hub 侧自查：`GET /status`（Bearer 项目 token，池状态/档位/成本）、`GET /admin/config`（Bearer admin token，热配置快照）。
 
+## 部署指引
+
+生产部署走 `deploy/` 下的脚本（不要手工敲 compose）：
+
+```bash
+bash deploy/deploy-prod.sh config    # .env / docker-compose.yml 变更 → 强制重建
+bash deploy/deploy-prod.sh build     # Dockerfile / pyproject.toml 变更 → 构建并重建
+bash deploy/deploy-prod.sh restart   # 只改了 app/**.py 代码（默认动作）
+```
+
+双机滚动部署、nginx 故障转移、vfs 存储驱动等生产细节见 [`docs/deploy.md`](docs/deploy.md)。
+
 ## 参考文档
 
 | 文件 | 说明 |
@@ -375,6 +404,11 @@ proxy-hub 侧自查：`GET /status`（Bearer 项目 token，池状态/档位/成
 | [`docs/api-reference.md`](docs/api-reference.md) | `SearchRequest` / `VolcSearchResponse` 字段全表、过滤器实现细节、SSE 端点 |
 | [`docs/elasticsearch.md`](docs/elasticsearch.md) | ES 双索引架构、热点索引查询策略（决策树 + 路径 A/B）、日志索引 ESLogHandler |
 | [`docs/deploy.md`](docs/deploy.md) | 部署运维：.env 维护、hf_cache 卷、重启 vs 重建、代理调优旋钮、踩坑速查 |
+| [`architecture-overview.md`](architecture-overview.md) | 架构与选型全景说明（热路/冷路、治理体系、排序模型、成本估算） |
+| [`llm-search-mcp-server-design.final.md`](llm-search-mcp-server-design.final.md) | 最终技术方案（设计目标 vs 实现状态逐条对照） |
+| [`CONTEXT.md`](CONTEXT.md) | 领域语言：排序/相关性术语表与已知失分模式 |
+| [`docs/roadmap-3month.md`](docs/roadmap-3month.md) | 迭代规划与北极星指标 |
+| [`docs/adr/`](docs/adr/) | 架构决策记录（ADR） |
 
 ## 开发
 

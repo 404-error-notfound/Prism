@@ -4,9 +4,9 @@
 # 适用症状（通常几条一起出现）：
 #   UnixHTTPConnectionPool(host='localhost', port=None): Read timed out. (read timeout=300)
 #   OCI runtime create failed: ... getting the final child's pid from pipe caused "EOF"
-#   部署日志里容器名带 <hash>_ 前缀（b08eb3f55cc8_prism_searxng-quark_1）
-#   同一服务反复 exited，重试 5 轮都不收敛
+#   部署日志里容器名带 <hash>_ 前缀；同一服务反复 exited，重试 5 轮都不收敛
 #
+# 前置条件：docker 命令可用、可访问守护进程；无环境变量（--restart-daemon 需 systemctl）。
 # 这个脚本只动宿主机侧状态，不碰项目文件、不改 .env：
 #   bash deploy/recover-docker.sh                  # 体检 + 清理残留（安全，不动运行中的容器）
 #   bash deploy/recover-docker.sh --restart-daemon # 上面基础上再重启 Docker 守护进程

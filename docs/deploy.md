@@ -2,6 +2,20 @@
 
 服务器自托管部署的操作手册。重点是几个反复踩过的坑——按这里来能少走弯路。
 
+## 目录
+
+- 前置：docker compose 命令
+- 部署脚本（生产走这个，别手工敲 compose）
+- 故障转移（F5 不可改：故障切换做在 nginx 层）
+- 首次部署
+- `.env` 是 gitignore 的——必须手动维护
+- 模型权重在 `hf_cache` 命名卷里——别删卷挂载
+- 改了东西之后，重启还是重建？
+- 存储驱动是 vfs（老 CentOS7 机器）——部署慢/失败的根源
+- proxy-hub（代理池服务，必须配套部署）
+- 验证清单
+- 代理调优旋钮（都在 proxy-hub 侧，热配置免重启）
+
 ## 前置：docker compose 命令
 
 - 优先用 `docker compose`（带空格，Docker CLI 插件）。
@@ -124,7 +138,7 @@ server {
 
 **双故障时调用方收到的降级响应**：
 
-```
+```http
 HTTP/1.1 503
 Content-Type: application/json
 X-Degraded: gateway-unreachable        ← 监控靠这个头区分"真正常"与"降级中"
@@ -146,7 +160,7 @@ X-Prism-Node: <机器名>                  ← 一眼看出响应来自哪台
 （维护窗口、对端预检、失败保持切对端）；`deploy.sh` 是 test/本地/prod 共用的环境通用脚本，
 **不含任何 prod 逻辑，改动它必须兼容 test 与本地**。每台的完整滚动语义：
 
-```
+```text
 放置标记 → 本机 nginx 全量切对端 → 逐服务串行重建 → 状态校验+健康检查+收工复核 → 移除标记切回本机
 ```
 
@@ -258,7 +272,7 @@ gateway 的模型（embedder + reranker）存在 `hf_cache` 命名卷。命名�
 | `app/**.py` 代码（volume 挂载） | `docker compose restart gateway`（进程重启即重新 import）|
 | **`.env`（env_file）** | `docker compose up -d gateway`（**`restart` 不重读 .env！** env_file 只在容器创建时读一次，restart 沿用旧环境——改了 .env 用 restart 等于没改，必须 up -d 重建）|
 | `docker-compose.yml` 的 `environment`/`volumes` | `docker compose up -d --force-recreate gateway`（restart 不读 compose 变更）|
-| `searxng/instance-*/settings.yml` 或 `limiter.toml` | `docker compose restart searxng-1 searxng-2 searxng-3` |
+| `searxng/settings.template.yml` 或 `limiter.toml` | `docker compose up -d --force-recreate searxng-baidu searxng-bing searxng-quark searxng-sogou searxng-wechat`（settings.yml 由 entrypoint 渲染，`restart` 不重新渲染，必须重建）|
 | **宿主机 repo 目录被删除重建** | `docker compose up -d --force-recreate`（bind mount 指向旧 inode 已失效，`restart` 救不回，症状：容器内 `getcwd() failed` / `No module named app`）|
 
 > 注意：日常**换 IP 不需要任何重启**——proxy-hub 隧道后端自动轮询活 IP 池，零窗口。只有上面这些配置结构变更才需重启。
@@ -277,7 +291,7 @@ vfs **没有层共享**：每创建一个容器就是把整份镜像目录完整
 
 2026-09-17 生产事故的原始报错：
 
-```
+```text
 ERROR: for prism_gateway_1  UnixHTTPConnectionPool(host='localhost', port=None): Read timed out. (read timeout=300)
 ERROR: for prism_searxng-quark_1  Cannot start service searxng-quark: OCI runtime create failed:
   container_linux.go:345: starting container process caused "process_linux.go:303:

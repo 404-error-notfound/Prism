@@ -198,7 +198,7 @@
 
 ## 2. 总体架构
 
-```
+```text
                             外部调用方（任意 LLM / 项目 / 终端）
          ┌──────────────┬───────────────┬──────────────┐
          │ MCP STDIO    │ MCP HTTP+SSE  │ REST + SSE   │
@@ -245,7 +245,7 @@
 
 ---
 
-## 2.1 端到端请求流程（`POST /api/search`）
+### 2.1 端到端请求流程（`POST /api/search`）
 
 > 本节以 **prism + proxy-hub（独立仓库）当前代码** 为准；与旧章节描述冲突处以此节为准。
 
@@ -282,7 +282,7 @@
 
 ---
 
-## 2.2 主链路 Mermaid 流程图
+### 2.2 主链路 Mermaid 流程图
 
 ```mermaid
 flowchart TD
@@ -322,7 +322,7 @@ flowchart TD
 
 ---
 
-## 2.3 代理 IP 风控时序图
+### 2.3 代理 IP 风控时序图
 
 ```mermaid
 sequenceDiagram
@@ -365,7 +365,7 @@ sequenceDiagram
 
 ---
 
-## 2.4 proxy-hub 内部维护流程图
+### 2.4 proxy-hub 内部维护流程图
 
 ```mermaid
 flowchart TD
@@ -398,7 +398,7 @@ flowchart TD
 
 ---
 
-## 2.5 关键时间预算总表
+### 2.5 关键时间预算总表
 
 ### prism 侧预算（秒）
 
@@ -501,7 +501,7 @@ flowchart TD
 
 ### 4.1 六层防线概览
 
-```
+```text
 原始结果池
   ↓
 第 1 层：源站准入控制 (Source Gate) —— **⚠️ 部分实现**
@@ -614,7 +614,7 @@ def query_commercial_tolerance(query: str) -> float:
 
 #### 4.3.5 四层兜底
 
-```
+```text
 第一层：正常过滤
 第二层：信息榨取补充
 第三层：逐步放宽，加回标记过的软广
@@ -692,7 +692,7 @@ Redis `session:signals:{id}` LIST 存最近 5 条事件，TTL 1h。分值表已�
 
 Redis `reputation:domain:{domain}`（HASH，字段 `good`/`bad`；`imp = good + bad` 由读取方派生，无独立 key）：
 
-```
+```text
 ratio = (good + 10) / (good + bad + 20)
 confidence = min(1, imp / 100)
 score = 0.5 * (1 - confidence) + ratio * confidence
@@ -783,7 +783,7 @@ score = (
 
 ### 6.2 `published_at` fallback 链
 
-```
+```text
 result["published_at"]
 → <meta property="article:published_time">
 → <meta name="pubdate" / "date">
@@ -828,7 +828,7 @@ result["published_at"]
 - 存储：`sha256(key)` 哈希后入 Redis；签发时明文只完整返回一次
 
 Redis Hash `tenant:{id}:config`：
-```
+```text
 quota_per_day           单日配额
 rate_limit_qps          每秒上限
 allowed_engines         引擎白名单（字段已预留，引擎过滤暂未强制执行）
@@ -876,7 +876,7 @@ commercial_filter_strength  广告过滤强度（用于合规场景）
 
 错误以 HTTP 状态码 + `{"detail": {"code", "message"}}` JSON 返回（应用本体是 REST + MCP，非 JSON-RPC 服务）：
 
-```
+```text
 -32001  AuthenticationFailed   （401）
 -32002  RateLimited            （429，含 Retry-After: 1）
 -32003  QuotaExceeded          （429，Retry-After: 86400）
@@ -1004,7 +1004,7 @@ commercial_filter_strength  广告过滤强度（用于合规场景）
 
 ### 10.4 运维脚本
 
-```
+```text
 scripts/create_api_key.py           签发 API Key
 scripts/seed_denylist.py            黑名单种子
 scripts/seed_domain_tiers.py        域名分档种子（T1/T2/academic/news）
@@ -1026,7 +1026,7 @@ API Key 取模切流、影子模式、蓝绿发布均无代码；当前发布方
 
 ## 11. 验证与测试
 
-### 9.1 启动
+### 11.1 启动
 
 ```bash
 cd prism-search
@@ -1038,7 +1038,7 @@ python scripts/create_api_key.py --tenant demo --quota 10000
 
 > compose 端口映射为 8081→8001；本地裸跑 `python -m app.main` 时用 8000。Redis 不可达时启动直接中止。
 
-### 9.2 端到端验证
+### 11.2 端到端验证
 
 ```bash
 KEY=<API_KEY>
@@ -1072,11 +1072,11 @@ curl -X POST http://localhost:8081/api/fetch \
 # 应返回 400（"URL resolves to private address"）
 ```
 
-### 9.3 精度评估（长尾 query 回放，月度回归待建）
+### 11.3 精度评估（长尾 query 回放，月度回归待建）
 
 当前以 `tests/manual_longtail_queries.md`（长尾 query 集）+ `scripts/replay_testset.py`（回放脚本）做人工验证。设计中的 100 条标注评估集（抽真实 query → 人工标注期望 URL → 月度跑 Top-5 命中率 / NDCG@10 对比火山）尚未建立。
 
-### 9.4 混沌测试（待实现）
+### 11.4 混沌测试（待实现）
 
 `scripts/chaos/` 不存在，以下场景无自动化验证；当前仅有引擎熔断（9s/3 次）与 Tier 2 付费兜底为真实行为：
 
@@ -1086,11 +1086,11 @@ curl -X POST http://localhost:8081/api/fetch \
 - [ ] Crawl4AI 僵死 → 超时 kill 重启
 - [ ] Tier 2 API 限流 → 熔断 + 回 SearXNG
 
-### 9.5 单测（pytest）
+### 11.5 单测（pytest）
 
 **当前已落地 14 个测试文件**（均为不触 Redis/模型/网络的纯函数单测）：
 
-```
+```text
 tests/
 ├── test_dedup.py                 # URL 规范化 + SimHash 去重
 ├── test_validator.py             # 边界 / 注入 / 长度 / 时效查询检测 / SSRF
@@ -1115,7 +1115,7 @@ tests/
 
 ## 12. 附录
 
-### 10.1 依赖清单 `pyproject.toml`
+### 12.1 依赖清单 `pyproject.toml`
 
 ```toml
 # 核心（默认安装）
@@ -1147,9 +1147,9 @@ dev = ["pytest>=8.0.0", "pytest-asyncio>=0.24.0", "pytest-cov>=6.0.0", "ruff>=0.
 
 全量安装：`pip install -e ".[dev,governance,browser]"`。
 
-### 10.2 目录结构（实际落地版）
+### 12.2 目录结构（实际落地版）
 
-```
+```text
 prism/
 ├── app/
 │   ├── main.py                        # FastAPI 入口 + MCP SSE 挂载 + 全局异常
@@ -1216,7 +1216,7 @@ prism/
 
 > `models/`、`nginx/`、`k8s/` 为预留项，不存在；`scripts/node_modules` 是误入的 JS 工具链目录，计划清理。
 
-### 10.3 与 v1 文档的对应关系
+### 12.3 与 v1 文档的对应关系
 
 本文档章节与 `llm-search-mcp-server-design.md` 的映射：
 
@@ -1228,7 +1228,7 @@ prism/
 | §6 七因子排序 | v1 §7.4 |
 | §2.3 代理 IP 风控时序图 | v1 §5.3 A 补强 |
 | §6.4 CPU 推理延迟预算 | v1 §7.4 补强 |
-| §11.1 微信风险 | v1 §13.1 |
+| §9.1 微信风险 | v1 §13.1 |
 | §2.5 关键时间预算总表 | v1 §13.2 |
 | §4.2 治理分级 | v1 §13.3 |
 | §7 多租户 / 校验 | v1 未覆盖，本文档新增 |
@@ -1243,7 +1243,7 @@ prism/
 
 > **更新时间**：2026-09-02。以下状态基于 `prism/app/` 实际代码，非设计意图。
 
-### 9.1 已落地功能（核心链路完整）
+### 13.1 已落地功能（核心链路完整）
 
 | 模块 | 代码位置 | 说明 |
 |------|----------|------|
@@ -1277,7 +1277,7 @@ prism/
 | trace_id 全链路日志 | `app/core/logging.py` | ContextVar 注入，文件 + ES `prism_logs` 双路，X-Trace-Id 响应头回传 |
 | APScheduler 定时任务 | `app/services/scheduler.py` | 信誉月度衰减 ×0.9、引擎健康探针每 5 分钟（仅告警）|
 
-### 9.2 未实现功能（与完整设计的差距）
+### 13.2 未实现功能（与完整设计的差距）
 
 #### 数据治理层（影响结果质量，高优先级）
 
@@ -1316,9 +1316,9 @@ prism/
 | E-04 | **种子数据脚本补全** | `seed_domain_tiers.py` 已建；`refresh_icp.py`、`seed_aigc_templates.py` 尚未创建 |
 | E-05 | **精度评估集**（100 条月度回归）| `tests/eval_set.jsonl` 不存在；当前以 `manual_longtail_queries.md` + `replay_testset.py` 人工验证 |
 
-### 9.3 建议实施顺序
+### 13.3 建议实施顺序
 
-```
+```text
 第一步（已完成）：G-01 SimHash ✅ → R-01 语义因子 ✅ → R-02 reranker+三道闸门 ✅
                      → G-03 AIGC 规则层 ✅ → L0 spam_gate ✅ → ProxyQualityError 代理重试 ✅
 
