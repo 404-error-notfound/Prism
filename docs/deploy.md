@@ -77,9 +77,10 @@ nginx 直接把请求转给对端。gateway 无状态（Redis 是远程集群）
 
 ### nginx 配置（两台机器同一份，仅对端 IP 不同）
 
-> **生产实际配置**：`deploy/<内部域名>.conf`（域名 `<内部域名>`，
+> **生产实际配置**：[`deploy/nginx/prism-search.web.internal.159.conf`](../deploy/nginx/prism-search.web.internal.159.conf)
+> 与 [`...160.conf`](../deploy/nginx/prism-search.web.internal.160.conf)（两份互为镜像，
 > 标记路径 `/opt/nginx/maintenance/prism.flag`，nginx 装在 `/opt/nginx`）。
-> <NODE1> 的对端是 <NODE2>，<NODE2> 上把两处 `<NODE2_IP>` 换成 `<NODE1_IP>`。
+> 文件内的 `192.0.2.159/160` 是 RFC 5737 文档保留段示例 IP，部署时换成两台机器的真实 IP。
 > 降级响应是**接口 JSON**（本服务是接口，不返回 HTML 页面），由 nginx 直接 `return`，
 > 无需任何静态文件。`message` 文案按前端/调用方的约定改。下面为通用示例，与实际文件一致：
 
@@ -167,14 +168,14 @@ X-Prism-Node: <机器名>                  ← 一眼看出响应来自哪台
 - 部署中、部署失败的机器，流量都在对端——**用户全程无感**
 - 部署失败时流量**保持**在对端（`NGINX_KEEP_FLAG_ON_FAILURE` 默认 1，无人值守安全取值）；
   平台重试或人工重跑即自愈：重放同一标记 → 成功 → 自动清除
-- 每台部署前**硬性预检对端健康**：`NGINX_PEER_URL` 不用配置——`deploy-prod.sh` 未取到值时
-  按本机 IP 自动推导镜像对端（<NODE1_IP>↔<NODE2_IP>），预检非 200 直接中止（此刻未动任何标记
-  与容器）——双机环境对端不可达 = 没有流量承接者，绝不硬上
+- 每台部署前**硬性预检对端健康**：`NGINX_PEER_URL` 在部署侧显式配置（环境变量或 `.env.prod`，
+  形如 `http://<对端IP>/health`），预检非 200 直接中止（此刻未动任何标记
+  与容器）——双机环境对端不可达 = 没有流量承接者，绝不硬上；未配置则跳过预检
 - `test` 环境（单机）自动跳过维护窗口，无需任何配置
 
-维护窗口常量（域名 `<内部域名>`、标记路径 `/opt/nginx/maintenance/prism.flag`、
+维护窗口常量（域名 `prism-search.web.internal`、标记路径 `/opt/nginx/maintenance/prism.flag`、
 探测地址 `http://127.0.0.1/health`）全部内置在 `deploy-prod.sh` 的默认值里，
-`.env.prod` 无需任何 NGINX_* 配置；`NGINX_PEER_URL` 按本机 IP 自动推导。
+`.env.prod` 无需其他 NGINX_* 配置；`NGINX_PEER_URL` 按上面说明显式配置。
 
 **残余风险**（nginx 层无解）：本机 nginx 挂 / 整机宕只能靠 F5 的 monitor（网络组管）。
 验证方法：低峰期停一台 nginx 30 秒看流量是否自动全落另一台。
@@ -185,7 +186,7 @@ X-Prism-Node: <机器名>                  ← 一眼看出响应来自哪台
 docker stop prism-gateway      # 本机故障 → 请求应仍 200（来自对端），数秒内切换
 docker start prism-gateway
 touch /opt/nginx/maintenance/prism.flag
-curl -sI -H 'Host: <内部域名>' http://127.0.0.1/health | head -1   # 200（由对端响应）
+curl -sI -H 'Host: prism-search.web.internal' http://127.0.0.1/health | head -1   # 200（由对端响应）
 rm /opt/nginx/maintenance/prism.flag
 ```
 

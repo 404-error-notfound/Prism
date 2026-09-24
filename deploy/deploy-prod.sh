@@ -23,10 +23,9 @@
 #   NGINX_MODE=off       关闭维护窗口（行为退回纯 deploy.sh）。
 #   NGINX_SERVER_NAME    本项目域名，带 Host 头自检用（默认 prism-search.web.internal）。
 #   NGINX_ENTRY_URL      探测地址（默认 http://127.0.0.1/health，打健康接口而非根路径）。
-#   NGINX_PEER_URL       对端 gateway 健康地址（http://<对端IP>:8081/health），
+#   NGINX_PEER_URL       对端 gateway 健康地址（http://<对端IP>/health），
 #                        部署前硬性预检：对端不可达 = 没有流量承接者，拒绝部署。
-#                        生产两台共用一份 .env.prod，此项通常不配置——脚本会按
-#                        本机 IP 自动推导镜像对端（192.0.2.159↔160）。
+#                        需在部署侧显式配置（环境变量或 .env.prod）；未配置则跳过对端预检。
 #   NGINX_KEEP_FLAG_ON_FAILURE=1 默认：部署失败流量保持在对端（用户无感），
 #                                重跑部署即自愈（重放标记→成功→自动清除）。
 set -uo pipefail
@@ -69,17 +68,8 @@ if [[ -f "$ENV_FILE" ]]; then
   unset _k _v
 fi
 
-# 生产两台共用同一份 .env.prod，机器相关的对端地址没法写进文件：
-# 未显式配置 NGINX_PEER_URL 时按本机 IP 自动推导镜像对端（192.0.2.159↔160）。
-# 推导不出的机器（非生产镜像对）保持为空，对端预检自动跳过。
-if [[ -z "$NGINX_PEER_URL" ]]; then
-  _ips="$(hostname -I 2>/dev/null || true)"
-  case "$_ips" in
-    *192.0.2.159*) NGINX_PEER_URL="http://192.0.2.160/health" ;;
-    *192.0.2.160*) NGINX_PEER_URL="http://192.0.2.159/health" ;;
-  esac
-  unset _ips
-fi
+# 对端地址与具体机器相关，本脚本不做任何自动推导：
+# 需在部署侧显式配置 NGINX_PEER_URL（环境变量或 .env.prod）；保持为空时对端预检自动跳过。
 NGINX_ENGAGED=0   # 本脚本是否真的摘过流量（幂等恢复的依据）
 
 nginx_target() {

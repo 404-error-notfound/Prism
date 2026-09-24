@@ -13,13 +13,14 @@ set -e
 PROJECT=prism-search
 SOURCE_CODE=${WORKSPACE}
 WEB_PATH=/opt/web/prism-search
-WEB_USER=<DEPLOY_USER>
+# 部署机登录用户与目标机 IP 与具体环境相关，由 Jenkins 凭据/构建参数注入，不写进仓库
+WEB_USER=${WEB_USER:?请通过 WEB_USER 环境变量指定部署机登录用户}
 
 # ── 1. 根据分支确定目标 IP 和环境 ──────────────────
 echo ">>> 当前分支: ${branchs}"
 
 if [ "${branchs}" == "origin/test" ]; then
-    IP="<TEST_SERVER_IP>"
+    IP=${TARGET_IP:?请通过 TARGET_IP 环境变量指定 test 目标服务器 IP}
     APP_ENV="test"
 else
     echo "[ERROR] 未识别的分支: ${branchs}，终止部署"
